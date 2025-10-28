@@ -1,0 +1,100 @@
+/* Copyright (C) Vedi Technologies (www.veditechnologies.net)  - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Kunal Sharma <kunal@veditechnologies.net>, oct 2025
+ */
+
+/*
+ * Description: Properties data Service to fetch from palomma leasing Ai external systems
+ * Change Log:
+ * Header required  [ x-api-key: Your API Key ]
+ * Header required  [ currentPage: 2 ]
+ * Header required  [ perPage: 10 ]
+ */
+@RestResource(urlMapping='/PropertyServiceApi/*')
+global class PropertyServiceApi {
+    
+    @HttpGet
+    global static void getProperty() {
+        Map<String, Object> response = new Map<String, Object>();
+          
+        try {
+            // Validate authentication header
+            String apiKey = RestContext.request.headers.get('x-api-key');
+            String SECRET_KEY = getPallommaCredentialValue('PALOMMA_LEASING_AI_API_KEY');  //
+
+            if (String.isBlank(apiKey) || apiKey != SECRET_KEY) {
+                RestContext.response.statusCode = 401;
+                response.put('status', 'Unauthorized');
+                response.put('message', 'Invalid API Key');
+                sendResponse(response);
+                return;
+            }
+            // Read Pagination Headers
+            String currentPageStr = RestContext.request.headers.get('currentPage');
+            String perPageStr = RestContext.request.headers.get('perPage');
+
+            Integer currentPage = String.isNotBlank(currentPageStr) ? Integer.valueOf(currentPageStr) : 1;
+            Integer perPage = String.isNotBlank(perPageStr) ? Integer.valueOf(perPageStr) : 10;
+
+            Integer offsetValue = (currentPage - 1) * perPage;
+
+            // Object-Level Security Check
+            if (!Schema.sObjectType.reda1__Property__c.isAccessible()) {
+                RestContext.response.statusCode = 501;
+                response.put('status', 'Forbidden');
+                response.put('message', 'User does not have access to Property object');
+                sendResponse(response);
+                return;
+            }
+
+            // Count total records
+            Integer totalRecords = [SELECT COUNT() FROM reda1__Property__c ];
+
+            // Fetch properties only if authentication is valid
+            List<reda1__Property__c> properties = [SELECT Id, Name, Description_Palomma__c ,Features__c,reda1__Best_Leasing_Term__r.reda1__Total_Rent_New_Lease__c ,
+            reda1__Beds__c, reda1__Baths__c ,reda1__Parking_Spaces__c , reda1__Built_Area__c,  reda1__Available_For_Leasing__c 
+            FROM reda1__Property__c Where reda1__Best_Leasing_Term__c !=null ORDER BY CreatedDate DESC LIMIT :perPage OFFSET :offsetValue ];
+
+            // Calculate pagination metadata
+            Integer lastPage = (Integer)Math.ceil((Decimal)totalRecords / perPage);
+            Integer fromIndex = offsetValue + 1;
+            Integer toIndex = Math.min(offsetValue + properties.size(), totalRecords);
+
+            response.put('data', properties);
+            response.put('to', properties.size()/perPage);
+            response.put('from', fromIndex);
+            response.put('last_page', lastPage);
+            response.put('current_page', currentPage);
+            response.put('per_page', perPage);
+            response.put('total', totalRecords);
+            
+            response.put('status', 'Success');
+            response.put('message', 'properties data fetched');
+            
+
+        } catch (Exception ex) {
+            RestContext.response.statusCode = 500;
+            response.put('status', 'Error');
+            response.put('message', ex.getMessage());
+        }
+
+        sendResponse(response);
+    }
+
+    // Helper to send JSON response
+    private static void sendResponse(Map<String, Object> response) {
+        RestContext.response.addHeader('Content-Type', 'application/json');
+        RestContext.response.responseBody = Blob.valueOf(JSON.serialize(response));
+    }
+
+    public static String getPallommaCredentialValue(String keyName) {
+        try {
+            RAFY_Config__mdt config = [ SELECT Key__c, Value__c FROM RAFY_Config__mdt  WHERE Key__c = :keyName LIMIT 1 ];
+            return config != null ? config.Value__c : null;
+        } catch (Exception e) {
+            System.debug('*****PropertyServiceApi***getPallommaCredentialValue*** Error fetching metadata key: ' + keyName + '. Exception: ' + e.getMessage());
+            return null;
+        }
+    }
+}
