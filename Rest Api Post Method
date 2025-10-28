@@ -1,0 +1,156 @@
+/* Copyright (C) Chandan Gupta
+ * All Rights Reserved - Unauthorized copying prohibited.
+ * Proprietary & Confidential
+ * Written by: Chandan Gupta <chandankumargupta474@gmail.com>
+ * Date: Oct 2025
+ */
+
+/*
+ * Description:
+ *  REST API Service to Create Property records in Salesforce from
+ *  Palomma Leasing AI External System.
+ *
+ * Required Request Header:
+ *  x-api-key : <Your API Key>
+ *
+ * Endpoint:
+ *  POST: /services/apexrest/PropertyServiceApi/
+ *
+ */
+
+@RestResource(urlMapping='/PropertyServiceApi/*')
+global class PropertyServiceApi {
+    
+    @HttpPost
+    global static void createProperty() {
+
+        // Final JSON response object to return to client
+        Map<String, Object> response = new Map<String, Object>();
+    
+        try {
+            /*--------------------------------------------------
+              API KEY VALIDATION
+            ---------------------------------------------------*/
+            String apiKey = RestContext.request.headers.get('x-api-key');
+            String SECRET_KEY = getPallommaCredentialValue('PALOMMA_LEASING_AI_API_KEY');
+    
+            // If API key missing or incorrect -> return Unauthorized
+            if (String.isBlank(apiKey) || apiKey != SECRET_KEY) {
+                RestContext.response.statusCode = 401; // Unauthorized status
+                response.put('status', 'Unauthorized');
+                response.put('message', 'Invalid API Key');
+                sendResponse(response);
+                return;
+            }
+    
+            /*--------------------------------------------------
+              CHECK OBJECT PERMISSION
+             Checks if user connected via integration has create access
+            ---------------------------------------------------*/
+            if (!Schema.sObjectType.reda1__Property__c.isCreateable()) {
+                RestContext.response.statusCode = 403; // Forbidden status
+                response.put('status', 'Forbidden');
+                response.put('message', 'User does not have permission to create Property records');
+                sendResponse(response);
+                return;
+            }
+    
+            /*--------------------------------------------------
+             PARSE JSON BODY
+            ---------------------------------------------------*/
+            String requestBody = RestContext.request.requestBody.toString();
+
+            // If no data provided in request
+            if (String.isBlank(requestBody)) {
+                RestContext.response.statusCode = 400; // Bad Request
+                response.put('status', 'Bad Request');
+                response.put('message', 'Missing request body');
+                sendResponse(response);
+                return;
+            }
+    
+            // Convert JSON to Map structure
+            Map<String, Object> requestData =
+                (Map<String, Object>) JSON.deserializeUntyped(requestBody);
+    
+            /*--------------------------------------------------
+              CREATE PROPERTY RECORD
+             Only map fields if present in JSON (Avoid DML errors)
+            ---------------------------------------------------*/
+            reda1__Property__c newProperty = new reda1__Property__c();
+    
+            if (requestData.containsKey('Name'))
+                newProperty.Name = (String) requestData.get('Name');
+    
+            if (requestData.containsKey('Description'))
+                newProperty.Description_Palomma__c = (String) requestData.get('Description');
+    
+            if (requestData.containsKey('Features'))
+                newProperty.Features__c = (String) requestData.get('Features');
+    
+            if (requestData.containsKey('Beds'))
+                newProperty.reda1__Beds__c = (Decimal) requestData.get('Beds');
+    
+            if (requestData.containsKey('Baths'))
+                newProperty.reda1__Baths__c = (Decimal) requestData.get('Baths');
+    
+            if (requestData.containsKey('Parking'))
+                newProperty.reda1__Parking_Spaces__c = (Decimal) requestData.get('Parking');
+    
+            if (requestData.containsKey('AvailableForLeasing'))
+                newProperty.reda1__Available_For_Leasing__c =
+                    (Boolean) requestData.get('AvailableForLeasing');
+    
+            //  Insert record in Salesforce
+            insert newProperty;
+    
+            /*--------------------------------------------------
+             SUCCESS RESPONSE
+            ---------------------------------------------------*/
+            RestContext.response.statusCode = 201; // Created
+            response.put('status', 'Success');
+            response.put('message', 'Property created successfully');
+            response.put('recordId', newProperty.Id);
+    
+        } catch (DmlException dmlEx) {
+            // Handle any database insertion errors
+            RestContext.response.statusCode = 400;
+            response.put('status', 'Error');
+            response.put('message', dmlEx.getMessage());
+    
+        } catch (Exception ex) {
+            // Generic Error Handler
+            RestContext.response.statusCode = 500;
+            response.put('status', 'Exception');
+            response.put('message', ex.getMessage());
+        }
+    
+        // Send JSON back to caller
+        sendResponse(response);
+    }
+
+    /*--------------------------------------------------
+      Helper to return JSON response to caller
+    ---------------------------------------------------*/
+    private static void sendResponse(Map<String, Object> response) {
+        RestContext.response.addHeader('Content-Type', 'application/json');
+        RestContext.response.responseBody =
+            Blob.valueOf(JSON.serialize(response));
+    }
+
+    /*--------------------------------------------------
+      Fetch Credential from Custom Metadata
+    ---------------------------------------------------*/
+    public static String getPallommaCredentialValue(String keyName) {
+        try {
+            RAFY_Config__mdt config =
+                [SELECT Key__c, Value__c
+                 FROM RAFY_Config__mdt
+                 WHERE Key__c = :keyName LIMIT 1];
+            return config != null ? config.Value__c : null;
+        } catch (Exception e) {
+            System.debug('***Error fetching key: ' + keyName + ' Error: ' + e.getMessage());
+            return null;
+        }
+    }
+}
